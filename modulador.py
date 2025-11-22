@@ -1,108 +1,139 @@
 import streamlit as st
+import numpy as np
 from mido import Message, MidiFile, MidiTrack
-import io
 
-# ---------------------------
-# Utilidades musicales básicas
-# ---------------------------
+############################################
+# DATOS BASE
+############################################
+NOTAS = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"]
 
-NOTAS = {
-    "C": 0, "C#": 1, "Db": 1, "D": 2, "D#": 3, "Eb": 3,
-    "E": 4, "F": 5, "F#": 6, "Gb": 6, "G": 7, "G#": 8,
-    "Ab": 8, "A": 9, "A#": 10, "Bb": 10, "B": 11
+ESCALAS_MAYORES = {
+    "C": ["C", "D", "E", "F", "G", "A", "B"],
+    "C#": ["C#", "D#", "F", "F#", "G#", "A#", "C"],
+    "D": ["D", "E", "F#", "G", "A", "B", "C#"],
+    "D#": ["D#", "F", "G", "G#", "A#", "C", "D"],
+    "E": ["E", "F#", "G#", "A", "B", "C#", "D#"],
+    "F": ["F", "G", "A", "A#", "C", "D", "E"],
+    "F#": ["F#", "G#", "A#", "B", "C#", "D#", "F"],
+    "G": ["G", "A", "B", "C", "D", "E", "F#"],
+    "G#": ["G#", "A#", "C", "C#", "D#", "F", "G"],
+    "A": ["A", "B", "C#", "D", "E", "F#", "G#"],
+    "A#": ["A#", "C", "D", "D#", "F", "G", "A"],
+    "B": ["B", "C#", "D#", "E", "F#", "G#", "A#"]
 }
 
-GRAUS = ["I", "ii", "iii", "IV", "V", "vi", "vii°"]
+GRADOS_MAYORES = ["I", "ii", "iii", "IV", "V", "vi", "vii°"]
 
-PROGRESIONES_TIPICAS = {
-    "Pop/Rock": ["I - V - vi - IV", "I - vi - IV - V", "vi - IV - I - V"],
-    "Balada": ["I - IV - V - I", "I - iii - IV - V"],
-    "Tensión → Resolución": ["ii - V - I", "iii - vi - ii - V - I"],
-}
+############################################
+# Construcción de acordes
+############################################
+def build_chord(root, tipo):
+    index = NOTAS.index(root)
+    tercera = {"maj": 4, "min": 3}[tipo]
+    quinta = 7
+    septima = {"maj7": 11, "min7": 10}
 
-ACORDES_PASO = [
-    "bIII", "bVI", "bVII", "#iv°", "#V°", "ii° paso", "V/V"
-]
+    notas = [NOTAS[(index + intervalo) % 12] for intervalo in [0, tercera, quinta]]
 
-# ---------------------------
-# Función para convertir acordes a MIDI
-# ---------------------------
+    if "7" in tipo:
+        notas.append(NOTAS[(index + septima[tipo]) % 12])
 
-def acordes_a_midi(acordes, tempo=500000):
+    return notas
+
+############################################
+# MIDI EXPORT
+############################################
+def nota_midi(nota, octava=4):
+    return NOTAS.index(nota) + 12 * (octava + 1)
+
+def export_midi(acordes, filename="modulacion.mid"):
     mid = MidiFile()
     track = MidiTrack()
     mid.tracks.append(track)
 
-    track.append(Message('program_change', program=0, time=0))
-
     for acorde in acordes:
-        if acorde not in NOTAS:
-            continue
+        for nota in acorde:
+            track.append(Message("note_on", note=nota_midi(nota), velocity=80, time=0))
+        track.append(Message("note_off", note=nota_midi(acorde[0]), velocity=80, time=480))
 
-        nota_base = NOTAS[acorde] + 60  # octave 5
+    mid.save(filename)
+    return filename
 
-        notas = [nota_base, nota_base + 4, nota_base + 7]
+############################################
+# Generación de opciones
+############################################
+def mod_pivote(t1, t2):
+    escala1 = ESCALAS_MAYORES[t1]
+    escala2 = ESCALAS_MAYORES[t2]
 
-        for n in notas:
-            track.append(Message('note_on', note=n, velocity=80, time=0))
+    pivotes = [n for n in escala1 if n in escala2]
 
-        for n in notas:
-            track.append(Message('note_off', note=n, velocity=80, time=480))
+    if not pivotes:
+        return None
 
-    buffer = io.BytesIO()
-    mid.save(buffer)
-    buffer.seek(0)
-    return buffer
+    pivote = pivotes[0]
 
-# ---------------------------
-# APP STREAMLIT
-# ---------------------------
+    return [
+        (f"{t1}maj7 (I en {t1})", build_chord(t1, "maj7")),
+        (f"{pivote}m7 (acorde pivote)", build_chord(pivote, "min7")),
+        (f"{t2}maj7 (I en {t2})", build_chord(t2, "maj7"))
+    ]
 
-st.title("🎵 Generador de Progresiones y Exportador MIDI")
-st.write("Herramienta para ayudarte a crear ideas musicales rápido.")
+def mod_dominante(t1, t2):
+    V_de_t2 = ESCALAS_MAYORES[t2][4]  # quinto grado del destino
+    return [
+        (f"{t1}maj7 (I en {t1})", build_chord(t1, "maj7")),
+        (f"{V_de_t2}7 (V7 hacia {t2})", build_chord(V_de_t2, "maj7")),
+        (f"{t2}maj7 (I en {t2})", build_chord(t2, "maj7"))
+    ]
 
-# 1. Preguntar tonalidad
-tonalidad = st.selectbox("Selecciona la tonalidad:", list(NOTAS.keys()))
+def mod_cromatica(t1, t2):
+    paso = NOTAS[(NOTAS.index(t1) + 1) % 12]  # subir un semitono
+    return [
+        (f"{t1}maj (I en {t1})", build_chord(t1, "maj")),
+        (f"{paso}m7 (acorde cromático)", build_chord(paso, "min7")),
+        (f"{t2}maj7 (I en {t2})", build_chord(t2, "maj7"))
+    ]
 
-# 2. Preguntar hacia dónde quieres ir
-objetivo = st.selectbox(
-    "¿Qué sensación buscas?",
-    ["Feliz / brillante", "Triste / melancólica", "Oscura / misteriosa", "Tensión → resolución"]
-)
+############################################
+# STREAMLIT UI
+############################################
+st.title("🎼 Modulador Armónico Profesional")
 
-# 3. Sugerir progresiones
-st.subheader("Progresiones sugeridas:")
+col1, col2 = st.columns(2)
+t1 = col1.selectbox("Tonalidad de origen", NOTAS)
+t2 = col2.selectbox("Tonalidad destino", NOTAS)
 
-if objetivo == "Feliz / brillante":
-    sugerencia = PROGRESIONES_TIPICAS["Pop/Rock"]
-elif objetivo == "Triste / melancólica":
-    sugerencia = PROGRESIONES_TIPICAS["Balada"]
-else:
-    sugerencia = PROGRESIONES_TIPICAS["Tensión → Resolución"]
+if st.button("Generar Modulaciones"):
+    st.subheader("🎯 Información de las tonalidades")
 
-prog = st.radio("Elige una progresión que te guste:", sugerencia)
+    st.write(f"**{t1} mayor:**")
+    for g, n in zip(GRADOS_MAYORES, ESCALAS_MAYORES[t1]):
+        st.write(f"{g}: {n}")
 
-# 4. Acordes de paso
-st.subheader("Acordes de paso opcionales:")
-acordes_paso_elegidos = st.multiselect("Añadir acorde(s) de paso:", ACORDES_PASO)
+    st.write(f"**{t2} mayor:**")
+    for g, n in zip(GRADOS_MAYORES, ESCALAS_MAYORES[t2]):
+        st.write(f"{g}: {n}")
 
-# 5. Confirmación
-if st.button("Generar progresión final"):
-    st.success("Progresión seleccionada:")
-    st.write("Progresión base:", prog)
-    st.write("Acordes de paso:", acordes_paso_elegidos if acordes_paso_elegidos else "Ninguno")
+    st.divider()
 
-# 6. Exportar MIDI
-st.subheader("Exportar MIDI")
+    # Opciones
+    opciones = [
+        ("Modulación por acorde pivote", mod_pivote(t1, t2)),
+        ("Dominante secundaria hacia la nueva tonalidad", mod_dominante(t1, t2)),
+        ("Modulación cromática", mod_cromatica(t1, t2))
+    ]
 
-acordes_simples = ["C", "F", "G", "Am"]  # demo temporal (luego lo hacemos dinámico)
+    for titulo, progresion in opciones:
+        if progresion:
+            st.subheader(f"🔹 {titulo}")
 
-if st.button("Exportar en MIDI"):
-    midi_buffer = acordes_a_midi(acordes_simples)
-    st.download_button(
-        label="Descargar archivo MIDI",
-        data=midi_buffer,
-        file_name="progresion.mid",
-        mime="audio/midi"
-    )
-    st.success("MIDI generado correctamente.")
+            acordes_solo_notas = []
+            for nombre, notas in progresion:
+                st.write(f"**{nombre}:** {notas}")
+                acordes_solo_notas.append(notas)
+
+            if st.button(f"Exportar '{titulo}' a MIDI"):
+                archivo = export_midi(acordes_solo_notas, f"{titulo}.mid")
+                with open(archivo, "rb") as f:
+                    st.download_button("Descargar MIDI", f, file_name=f"{titulo}.mid")
