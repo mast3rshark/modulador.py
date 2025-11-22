@@ -1,14 +1,11 @@
-# app_pdf_viewer.py
+# app_clean.py — Versión sin PDF y sin matplotlib
 import streamlit as st
 import pandas as pd
 import numpy as np
-import matplotlib.pyplot as plt
-from math import pi
 
-# ---------- Ruta al PDF ----------
-PDF_PATH = "/mnt/data/Brian Callipari - Armonía Ilustrada - Español.pdf"
-
-# ---------- Utiles musicales ----------
+# ----------------------
+# UTILIDADES MUSICALES
+# ----------------------
 SHARP = ['C','C#','D','D#','E','F','F#','G','G#','A','A#','B']
 FLAT  = ['C','Db','D','Eb','E','F','Gb','G','Ab','A','Bb','B']
 
@@ -31,9 +28,8 @@ def index_to_note(i, prefer_flats=False):
 
 def prefer_flats(tonic):
     left = ['F','Bb','Eb','Ab','Db','Gb','Cb']
-    right = ['G','D','A','E','B','F#','C#']
-    if tonic in left or tonic.endswith('b'): return True
-    if tonic in right or tonic.endswith('#'): return False
+    if tonic in left or tonic.endswith('b'):
+        return True
     return False
 
 def build_scale(tonic, mode='major'):
@@ -42,159 +38,169 @@ def build_scale(tonic, mode='major'):
     start = note_to_index(tonic)
     steps = MAJOR_STEPS if mode=='major' else MINOR_STEPS
     notes = [index_to_note(start, pf)]
-    idx = start
+    i = start
     for s in steps[:-1]:
-        idx = (idx + s) % 12
-        notes.append(index_to_note(idx, pf))
+        i = (i + s) % 12
+        notes.append(index_to_note(i, pf))
     return notes
 
 def triad(scale, degree):
     n = len(scale)
-    return [ scale[(degree-1) % n], scale[(degree+1) % n], scale[(degree+3) % n] ]
+    return [
+        scale[(degree-1) % n],
+        scale[(degree+1) % n],
+        scale[(degree+3) % n]
+    ]
 
 def seventh(scale, degree):
     n = len(scale)
-    return [ scale[(degree-1) % n], scale[(degree+1) % n], scale[(degree+3) % n], scale[(degree+5) % n] ]
+    return [
+        scale[(degree-1) % n],
+        scale[(degree+1) % n],
+        scale[(degree+3) % n],
+        scale[(degree+5) % n]
+    ]
 
-# ---------- UI ----------
-st.set_page_config(page_title="Armonía Ilustrada — Interactivo", layout="wide")
-st.title("📘 Armonía Ilustrada — Interactivo")
-st.write("Explora conceptos del libro de forma interactiva: círculo de quintas, modos, acordes y modulaciones.")
+# ----------------------
+# STREAMLIT UI
+# ----------------------
+st.set_page_config(page_title="Armonía Interactiva", layout="wide")
+st.title("🎵 Armonía Interactiva — Basado en 'Armonía Ilustrada'")
 
-# Sidebar
-st.sidebar.header("Navegación")
 page = st.sidebar.selectbox(
-    "Ir a",
-    ["Índice & PDF", "Círculo de Quintas", "Modos y Acordes", "Modulación interactiva", "Notas del autor / Glue"]
+    "Navegar",
+    ["Círculo de Quintas", "Modos y Acordes", "Modulación interactiva", "Conceptos del Libro"]
 )
-st.sidebar.markdown(f"[📄 Abrir PDF completo]({PDF_PATH})")
 
-# ------------------ INDEX PAGE ------------------
-if page == "Índice & PDF":
-    st.header("Índice rápido del PDF")
+# ----------------------
+# CÍRCULO DE QUINTAS (texto)
+# ----------------------
+if page == "Círculo de Quintas":
+    st.header("Círculo de Quintas — Versión ligera")
     st.write("""
-    - Escalas mayores y menores  
-    - Dominantes  
-    - Disminuidos  
-    - Aumentados  
-    - Puentes  
-    - Sustitutos tritonales  
-    - Modulación  
-    - Proximidad de acordes  
-    """)
+El círculo de quintas muestra cómo las tonalidades están relacionadas entre sí.
+Hacia la derecha hay más sostenidos (#), hacia la izquierda más bemoles (b).
+""")
 
-    st.subheader("Visualizador del PDF")
-    try:
-        st.markdown(
-            f"<iframe src='{PDF_PATH}' width='100%' height='600'></iframe>",
-            unsafe_allow_html=True
-        )
-    except:
-        st.warning("Si no se carga, usa el link de la barra lateral.")
+    tonic = st.selectbox("Escoge una tonalidad", CIRCLE_QUINTS)
 
-# ------------------ CIRCLE OF FIFTHS ------------------
-elif page == "Círculo de Quintas":
-    st.header("Círculo de Quintas — Interactivo")
+    idx = CIRCLE_QUINTS.index(tonic)
+    right = CIRCLE_QUINTS[(idx+1)%len(CIRCLE_QUINTS)]
+    left = CIRCLE_QUINTS[(idx-1)%len(CIRCLE_QUINTS)]
 
-    fig, ax = plt.subplots(figsize=(6, 6))
-    labels = CIRCLE_QUINTS
-    n = len(labels)
-    angles = np.linspace(0, 2*np.pi, n, endpoint=False)
-    xs = np.cos(angles)
-    ys = np.sin(angles)
+    st.subheader("Vecinos")
+    st.write(f"→ A la derecha (más #): **{right}**")
+    st.write(f"← A la izquierda (más b): **{left}**")
 
-    ax.scatter(xs, ys)
+    st.subheader("Moverse a otra tonalidad")
+    target = st.selectbox("Destino", CIRCLE_QUINTS)
 
-    for i, lab in enumerate(labels):
-        ax.text(xs[i]*1.12, ys[i]*1.12, lab, ha='center', fontsize=12)
+    dist = CIRCLE_QUINTS.index(target) - idx
 
-    ax.add_artist(plt.Circle((0,0), 1.0, fill=False, linestyle="--"))
-    ax.set_xticks([]); ax.set_yticks([])
-    st.pyplot(fig)
+    st.write(f"Distancia en el círculo: **{dist} pasos**")
 
-    tonic = st.selectbox("Escoge tónica", labels)
-    idx = labels.index(tonic)
-    right = labels[(idx+1)%n]
-    left = labels[(idx-1)%n]
+    if abs(dist) <= 1:
+        st.success("Modulación muy suave (tonalidades vecinas).")
+    elif abs(dist) <= 3:
+        st.info("Modulación moderada (usa acordes pivote).")
+    else:
+        st.warning("Modulación fuerte (usa dominantes secundarios o sustitutos tritonales).")
 
-    st.write(f"Vecino derecho (más #): **{right}**")
-    st.write(f"Vecino izquierdo (más b): **{left}**")
-
-    target = st.selectbox("Destino", labels)
-    steps = labels.index(target) - idx
-
-    st.write(f"Distancia: {steps} pasos (positivo = horario). Recomendación: 0 = mismo tono; ±1 = suave; ±2-3 = moderada; ≥4 = fuerte.")
-
-# ------------------ MODES & CHORDS ------------------
+# ----------------------
+# MODOS Y ACORDES
+# ----------------------
 elif page == "Modos y Acordes":
-    st.header("Modos y acordes diatónicos")
+    st.header("Modos y Acordes Diatónicos")
 
     tonic = st.selectbox("Tónica", SHARP + FLAT)
-    mode_base = st.radio("Modo", ["major", "minor"])
+    mode = st.radio("Modo", ["major", "minor"])
 
-    scale = build_scale(tonic, mode_base)
+    scale = build_scale(tonic, mode)
+
     st.subheader("Escala")
     st.write(scale)
 
-    st.subheader("Acordes del modo (triada y séptima)")
+    st.subheader("Acordes en el modo")
     degrees = ["I","ii","iii","IV","V","vi","vii°"]
-    rows = []
+    data = []
+
     for i, deg in enumerate(degrees, start=1):
-        rows.append({
+        data.append({
             "Grado": deg,
             "Triada": " - ".join(triad(scale, i)),
-            "7ma": " - ".join(seventh(scale, i))
+            "Séptima": " - ".join(seventh(scale, i)),
         })
 
-    df = pd.DataFrame(rows)
-    st.table(df)
+    st.table(pd.DataFrame(data))
 
     st.subheader("Modos derivados (jónico → locrio)")
-
+    # Para modos siempre usamos la escala mayor relativa
     major_scale = build_scale(
-        tonic if mode_base=="major" else index_to_note((note_to_index(tonic)+3)%12),
+        tonic if mode=="major" else index_to_note((note_to_index(tonic)+3)%12),
         "major"
     )
 
     mode_names = ["Jónico","Dórico","Frigio","Lidio","Mixolidio","Eólico","Locrio"]
 
-    for i in range(7):
-        mode_notes = [major_scale[(i+j) % 7] for j in range(7)]
-        st.write(f"**{mode_names[i]}** → {', '.join(mode_notes)}")
+    for i, name in enumerate(mode_names):
+        m = [major_scale[(i+j)%7] for j in range(7)]
+        st.write(f"**{name}** → {', '.join(m)}")
 
-# ------------------ MODULATION TOOL ------------------
+# ----------------------
+# MODULACIÓN
+# ----------------------
 elif page == "Modulación interactiva":
-    st.header("Herramienta de modulación")
+    st.header("Herramienta de Modulación")
 
     origin = st.selectbox("Tonalidad origen", CIRCLE_QUINTS)
     target = st.selectbox("Tonalidad destino", CIRCLE_QUINTS)
 
-    if st.button("Calcular modulación"):
-        st.write(f"De **{origin}** → **{target}**")
+    if st.button("Calcular"):
+        st.write(f"De **{origin}** a **{target}**")
 
         pos_o = CIRCLE_QUINTS.index(origin)
         pos_t = CIRCLE_QUINTS.index(target)
-        dist = pos_t - pos_o
 
-        st.write(f"Distancia: {dist} pasos (positivo = horario). Recomendación: 0 = mismo tono; ±1 = muy suave; ±2-3 = moderada; ≥4 = fuerte.")
+        dist = pos_t - pos_o
+        st.write(f"Distancia: **{dist} pasos**")
 
         if abs(dist) <= 1:
             st.success("Modulación suave: usa acordes pivote y notas comunes.")
         elif abs(dist) <= 3:
-            st.info("Modulación media: dominante secundaria o cadencia intermedia.")
+            st.info("Modulación media: dominante secundaria o subV7.")
         else:
-            st.warning("Modulación lejana: usa sustituto tritonal o cadena de dominantes.")
+            st.warning("Modulación fuerte: cadena de dominantes o sustituto tritonal.")
 
-        st.subheader("Sugerencias generales:")
-        st.write("- Busca acordes comunes entre ambas tonalidades.")
-        st.write("- Introduce el V7 de la tonalidad destino.")
-        st.write("- Mantén una nota común como “pegamento melódico”.")
+        st.write("### Sugerencias:")
+        st.write("- Busca acordes comunes en ambas tonalidades")
+        st.write("- Introduce el **V7** del destino")
+        st.write("- Usa una nota común como pegamento melódico")
 
-# ------------------ GLUE ------------------
-elif page == "Notas del autor / Glue":
-    st.header("Glue mágico — Notas del libro")
+# ----------------------
+# CONCEPTOS DEL LIBRO
+# ----------------------
+elif page == "Conceptos del Libro":
+    st.header("Conceptos Clave del Libro (Texto)")
+
+    st.subheader("Glue mágico")
     st.write("""
-    • La melodía actúa como pegamento entre los acordes  
-    • Mantener una o dos notas estables ayuda a suavizar la modulación  
-    • El acorde pivote funciona cuando pertenece a ambas tonalidades  
-    """)
+La melodía es el pegamento entre los acordes.  
+Si mantienes una o dos notas estables, la modulación será mucho más suave.
+""")
+
+    st.subheader("Acordes pivote")
+    st.write("""
+Un acorde que pertenece a ambas tonalidades permite
+cambiar sin sobresaltos (muy útil para modulaciones suaves).
+""")
+
+    st.subheader("Sustitutos tritonales")
+    st.write("""
+El V7 puede reemplazarse por bII7 (subV7), creando tensión elegante para modulaciones lejanas.
+""")
+
+    st.subheader("Cadena de dominantes")
+    st.write("""
+Ideal para modulaciones fuertes:  
+VII7 → III7 → VI7 → II7 → V7 → I
+""")
