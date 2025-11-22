@@ -1,148 +1,255 @@
+# app.py
 import streamlit as st
-import numpy as np
-from mido import Message, MidiFile, MidiTrack
+from dataclasses import dataclass
+from typing import List
 
-############################################
-# DATOS BASE
-############################################
-NOTAS = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"]
+# ---------------------------
+# Configuración: círculo de quintas para decidir # vs b
+# ---------------------------
+# Orden relativo en el círculo: empezando en C y yendo a la derecha (#) y a la izquierda (b)
+SHARP_SIDE = ["G","D","A","E","B","F#","C#"]
+FLAT_SIDE = ["F","Bb","Eb","Ab","Db","Gb","Cb"]
 
-ESCALAS_MAYORES = {
-    "C": ["C", "D", "E", "F", "G", "A", "B"],
-    "C#": ["C#", "D#", "F", "F#", "G#", "A#", "C"],
-    "D": ["D", "E", "F#", "G", "A", "B", "C#"],
-    "D#": ["D#", "F", "G", "G#", "A#", "C", "D"],
-    "E": ["E", "F#", "G#", "A", "B", "C#", "D#"],
-    "F": ["F", "G", "A", "A#", "C", "D", "E"],
-    "F#": ["F#", "G#", "A#", "B", "C#", "D#", "F"],
-    "G": ["G", "A", "B", "C", "D", "E", "F#"],
-    "G#": ["G#", "A#", "C", "C#", "D#", "F", "G"],
-    "A": ["A", "B", "C#", "D", "E", "F#", "G#"],
-    "A#": ["A#", "C", "D", "D#", "F", "G", "A"],
-    "B": ["B", "C#", "D#", "E", "F#", "G#", "A#"]
-}
+# Lista de nombres posibles para selector (incluye sostenidos y bemoles comunes)
+TONICS = ["C","G","D","A","E","B","F#","C#","F","Bb","Eb","Ab","Db","Gb","Cb",
+          "Am","Em","Bm","F#m","C#m","G#m","D#m","Fm","Dm","Gm","Cm","Fm","Bbm"]
 
-GRADOS_MAYORES = ["I", "ii", "iii", "IV", "V", "vi", "vii°"]
+# We'll show a shorter, friendly list (common tonics, majors and minors)
+TONICS_UI = [
+    "C", "G", "D", "A", "E", "B", "F#", "C#",
+    "F", "Bb", "Eb", "Ab", "Db", "Gb", "Cb",
+    "Am", "Em", "Bm", "F#m", "C#m", "G#m", "D#m",
+    "Dm", "Gm", "Cm", "Fm", "Bbm"
+]
 
-############################################
-# Construcción de acordes
-############################################
-def build_chord(root, tipo):
-    """Genera acordes mayores, menores, maj7 y min7."""
-    index = NOTAS.index(root)
+# 12-tone mapping
+SHARP = ['C','C#','D','D#','E','F','F#','G','G#','A','A#','B']
+FLAT  = ['C','Db','D','Eb','E','F','Gb','G','Ab','A','Bb','B']
 
-    # Interválica
-    terceras = {"maj": 4, "min": 3, "maj7": 4, "min7": 3}
-    septimas = {"maj7": 11, "min7": 10}
+def norm_tonic(s: str) -> str:
+    """Normalize user string like 'Am' -> ('A', 'minor') or 'C#' -> ('C#','major')"""
+    s = s.strip()
+    if s.endswith('m') or s.endswith('min') or s.endswith('minor'):
+        # accept 'Am' or 'Amin' etc.
+        root = s[0].upper() + (s[1] if len(s)>1 and s[1] in ['#','b'] else '')
+        return root, 'minor'
+    # if user selected a major tonic (like 'C')
+    root = s[0].upper() + (s[1] if len(s)>1 and s[1] in ['#','b'] else '')
+    return root, 'major'
 
-    tercera = terceras[tipo]
-    quinta = 7
+def note_to_index(n: str) -> int:
+    n = n.replace('♯','#').replace('♭','b')
+    if n in SHARP:
+        return SHARP.index(n)
+    if n in FLAT:
+        return FLAT.index(n)
+    raise ValueError(f"Nota desconocida: {n}")
 
-    notas = [
-        NOTAS[(index + 0) % 12],
-        NOTAS[(index + tercera) % 12],
-        NOTAS[(index + quinta) % 12]
-    ]
+def index_to_note(i: int, prefer_flats: bool=False) -> str:
+    i = i % 12
+    return FLAT[i] if prefer_flats else SHARP[i]
 
-    if tipo in ["maj7", "min7"]:
-        notas.append(NOTAS[(index + septimas[tipo]) % 12])
+def prefer_flats_for_tonic(tonic: str) -> bool:
+    # Decide flats vs sharps using circle of fifths rule:
+    if tonic in FLAT_SIDE or tonic.endswith('b'):
+        return True
+    if tonic in SHARP_SIDE or tonic.endswith('#'):
+        return False
+    # C default: sharps/no flats
+    return False
 
-    return notas
+MAJOR_STEPS = [2,2,1,2,2,2,1]
+MINOR_STEPS = [2,1,2,2,1,2,2]  # natural minor
 
-############################################
-# MIDI EXPORT
-############################################
-def nota_midi(nota, octava=4):
-    return NOTAS.index(nota) + 12 * (octava + 1)
+def build_scale(tonic: str, mode: str='major') -> List[str]:
+    tonic = tonic.replace('♯','#').replace('♭','b')
+    prefer_flats = prefer_flats_for_tonic(tonic)
+    start = note_to_index(tonic)
+    steps = MAJOR_STEPS if mode=='major' else MINOR_STEPS
+    notes = [index_to_note(start, prefer_flats)]
+    idx = start
+    for s in steps[:-1]:
+        idx = (idx + s) % 12
+        notes.append(index_to_note(idx, prefer_flats))
+    return notes
 
-def export_midi(acordes, filename="modulacion.mid"):
-    mid = MidiFile()
-    track = MidiTrack()
-    mid.tracks.append(track)
+# chord building by stacking scale degrees (1-3-5) using the scale list (correct spelling)
+def triad_from_scale(scale: List[str], degree:int) -> List[str]:
+    n = len(scale)
+    root = scale[(degree-1) % n]
+    third = scale[(degree+1) % n]
+    fifth = scale[(degree+3) % n]
+    return [root, third, fifth]
 
-    for acorde in acordes:
-        for nota in acorde:
-            track.append(Message("note_on", note=nota_midi(nota), velocity=80, time=0))
-        track.append(Message("note_off", note=nota_midi(acorde[0]), velocity=80, time=480))
+def seventh_from_scale(scale: List[str], degree:int) -> List[str]:
+    # 1-3-5-7 stacking
+    n = len(scale)
+    root = scale[(degree-1) % n]
+    third = scale[(degree+1) % n]
+    fifth = scale[(degree+3) % n]
+    seventh = scale[(degree+5) % n]
+    return [root, third, fifth, seventh]
 
-    mid.save(filename)
-    return filename
+def triad_quality_by_intervals(triad: List[str]) -> str:
+    # Determine quality by intervals in semitones
+    a = note_to_index(triad[0])
+    b = note_to_index(triad[1])
+    c = note_to_index(triad[2])
+    i1 = (b - a) % 12
+    i2 = (c - b) % 12
+    if i1==4 and i2==3:
+        return "maj"
+    if i1==3 and i2==4:
+        return "min"
+    if i1==3 and i2==3:
+        return "dim"
+    return "unknown"
 
-############################################
-# Opciones de modulación
-############################################
-def mod_pivote(t1, t2):
-    escala1 = ESCALAS_MAYORES[t1]
-    escala2 = ESCALAS_MAYORES[t2]
+def seventh_quality_by_intervals(sev: List[str], triad_quality: str) -> str:
+    # Check interval between root and 7th
+    a = note_to_index(sev[0])
+    d = note_to_index(sev[3])
+    interval = (d - a) % 12
+    # typical naming:
+    if triad_quality=="maj" and interval==11:
+        return "maj7"
+    if triad_quality=="maj" and interval==10:
+        return "7"     # dominant 7
+    if triad_quality=="min" and interval==10:
+        return "m7"
+    if triad_quality=="dim" and interval==10:
+        return "m7b5"
+    # fallback
+    return "7"
 
-    comunes = [n for n in escala1 if n in escala2]
-    if not comunes:
-        return None
+# Modes: rotate major scale
+MODE_NAMES = ["Jónico (Ionian)","Dórico (Dorian)","Frigio (Phrygian)",
+              "Lidio (Lydian)","Mixolidio (Mixolydian)","Eólico (Aeolian)","Locrio (Locrian)"]
 
-    pivote = comunes[0]
+def build_modes_from_major(major_scale: List[str]) -> List[List[str]]:
+    modes = []
+    n = len(major_scale)
+    for i in range(n):
+        mode = [major_scale[(i + j) % n] for j in range(n)]
+        modes.append(mode)
+    return modes
 
-    return [
-        (f"{t1}maj7 (I en {t1})", build_chord(t1, "maj7")),
-        (f"{pivote}m7 (acorde pivote)", build_chord(pivote, "min7")),
-        (f"{t2}maj7 (I en {t2})", build_chord(t2, "maj7"))
-    ]
+# ---------------------------
+# UI
+# ---------------------------
+st.set_page_config(page_title="Modulador — Escalas y Modos", layout="wide")
+st.title("🔷 Modulador — Escalas, Acordes y Modos (Mayor & Menor)")
 
-def mod_dominante(t1, t2):
-    V_de_t2 = ESCALAS_MAYORES[t2][4]
-    return [
-        (f"{t1}maj7 (I en {t1})", build_chord(t1, "maj7")),
-        (f"{V_de_t2}7 (dominante hacia {t2})", build_chord(V_de_t2, "maj7")),
-        (f"{t2}maj7 (I en {t2})", build_chord(t2, "maj7"))
-    ]
+st.markdown("Selecciona la tonalidad (elige mayor o menor). El sistema usa el **círculo de quintas** para decidir si mostrar sostenidos (`#`) o bemoles (`b`).")
 
-def mod_cromatica(t1, t2):
-    paso = NOTAS[(NOTAS.index(t1) + 1) % 12]
-    return [
-        (f"{t1}maj (I)", build_chord(t1, "maj")),
-        (f"{paso}m7 (cromático)", build_chord(paso, "min7")),
-        (f"{t2}maj7 (I en {t2})", build_chord(t2, "maj7"))
-    ]
+# Choose tonic and mode
+col1, col2 = st.columns([1,1])
+with col1:
+    tonic_input = st.selectbox("Tonalidad (base)", options=[
+        "C","G","D","A","E","B","F#","C#",
+        "F","Bb","Eb","Ab","Db","Gb","Cb",
+        "Am","Em","Bm","F#m","C#m","G#m","D#m",
+        "Dm","Gm","Cm","Fm","Bbm"
+    ], index=0)
+with col2:
+    # Normalize selection into root / mode
+    # If selection ends with 'm' treat as minor; otherwise ask radio
+    if tonic_input.endswith('m') or tonic_input.endswith('m'):
+        # treat as minor
+        root_note, forced_mode = tonic_input[:-1].upper(), "minor"
+        _mode = st.radio("Modo", options=["minor"], index=0, disabled=True)
+    else:
+        root_note = tonic_input
+        _mode = st.radio("Modo", options=["major","minor"], index=0)
 
-############################################
-# STREAMLIT UI
-############################################
-st.title("🎼 Modulador Armónico Profesional")
+# allow user to override accidental display preference
+auto_prefer_flats = prefer_flats_for_tonic(root_note)
+prefer_choice = st.radio("Notación preferida (automático/cambiar):",
+                        options=["Automático (círculo de quintas)", "Forzar #: sostenidos", "Forzar b: bemoles"],
+                        index=0)
+if prefer_choice == "Forzar #: sostenidos":
+    prefer_flats = False
+elif prefer_choice == "Forzar b: bemoles":
+    prefer_flats = True
+else:
+    prefer_flats = auto_prefer_flats
 
-col1, col2 = st.columns(2)
-t1 = col1.selectbox("Tonalidad de origen", NOTAS)
-t2 = col2.selectbox("Tonalidad destino", NOTAS)
+# compute actual tonic to use for spelling (if user selected minor mode but root_note from selection might be major)
+# Use root_note and mode _mode to build scale
+try:
+    # if user selected minor via radio, keep root_note as is; but if they selected a minor tonic like "Am" initial, root_note already set
+    tonic = root_note
+    mode = _mode
+    # build scale
+    scale = build_scale(tonic, 'major' if mode=='major' else 'minor')
+except Exception as e:
+    st.error(f"Error construyendo la escala: {e}")
+    st.stop()
 
-if st.button("Generar Modulaciones"):
-    st.subheader("🎯 Tonalidades y grados")
+# Relative keys
+if mode == 'major':
+    # relative minor is vi degree
+    rel_minor = scale[5]
+    rel_text = f"La relativa menor de {tonic} mayor es: **{rel_minor}m**"
+else:
+    # relative major is +3 semitones (minor tonic -> major tonic)
+    rel_major_idx = (note_to_index(tonic) + 3) % 12
+    rel_major = index_to_note(rel_major_idx, prefer_flats)
+    rel_text = f"La relativa mayor de {tonic} menor es: **{rel_major}**"
 
-    st.write(f"### {t1} mayor")
-    for g, n in zip(GRADOS_MAYORES, ESCALAS_MAYORES[t1]):
-        st.write(f"{g}: {n}")
+# Display basic info
+st.markdown("---")
+st.subheader("🔹 Información básica")
+st.write(f"**Tonalidad seleccionada:** {tonic}  ({'Mayor' if mode=='major' else 'Menor'})")
+st.write(rel_text)
+st.write(f"**Notación usada:** {'bemoles (b)' if prefer_flats else 'sostenidos (#)'} (según círculo de quintas / elección)")
 
-    st.write(f"### {t2} mayor")
-    for g, n in zip(GRADOS_MAYORES, ESCALAS_MAYORES[t2]):
-        st.write(f"{g}: {n}")
+# display scale
+st.subheader("🔸 Escala")
+st.write("Notas de la escala:", ", ".join(scale))
 
-    st.divider()
-    st.subheader("🎵 Opciones de modulación")
+# Diatonic chords
+st.subheader("🔸 Acordes diatónicos (triada y 7ª) con su calidad")
+cols = st.columns([1,1,1,1])
+headers = ["Grado","Triada (notas)","Calidad","Séptima (notas / tipo)"]
+for c,h in zip(cols, headers):
+    c.write(f"**{h}**")
 
-    opciones = [
-        ("Modulación por acorde pivote", mod_pivote(t1, t2)),
-        ("Dominante secundaria hacia la nueva tonalidad", mod_dominante(t1, t2)),
-        ("Modulación cromática", mod_cromatica(t1, t2)),
-    ]
+degrees = ["I","ii","iii","IV","V","vi","vii°"]
+triads = []
+sevenths = []
+for i, deg in enumerate(degrees, start=1):
+    tri = triad_from_scale(scale, i)
+    tri_q = triad_quality_by_intervals(tri)
+    sev = seventh_from_scale(scale, i)
+    sev_q = seventh_quality_by_intervals(sev, tri_q)
+    triads.append((deg, tri, tri_q, sev, sev_q))
 
-    for titulo, progresion in opciones:
-        if progresion:
-            st.markdown(f"## 🔹 {titulo}")
+# print rows
+for deg, tri, tri_q, sev, sev_q in triads:
+    c1, c2, c3, c4 = st.columns([1,2,1,2])
+    c1.write(f"**{deg}**")
+    c2.write(f"{tri[0]} – {tri[1]} – {tri[2]}")
+    # human friendly quality names
+    qtext = {"maj":"Mayor","min":"Menor","dim":"Disminuido","unknown":"Desconocido"}.get(tri_q, tri_q)
+    c3.write(qtext)
+    c4.write(f"{sev[0]} – {sev[1]} – {sev[2]} – {sev[3]}  ({sev_q})")
 
-            acordes_solo = []
+# Modes
+st.subheader("🔸 Modos griegos (basados en la escala mayor relativa)")
+# Build modes from the major scale that corresponds to this tonal center.
+if mode == 'major':
+    major_base = scale
+else:
+    # If user chose minor, show modes from the relative major
+    # relative major index:
+    rel_maj_idx = (note_to_index(tonic) + 3) % 12
+    rel_maj = index_to_note(rel_maj_idx, prefer_flats)
+    major_base = build_scale(rel_maj, 'major')
 
-            for nombre, notas in progresion:
-                st.write(f"**{nombre}:** {notas}")
-                acordes_solo.append(notas)
+modes = build_modes_from_major(major_base)
+for name, m in zip(MODE_NAMES, modes):
+    st.write(f"**{name}:** " + ", ".join(m))
 
-            if st.button(f"Exportar '{titulo}' como MIDI"):
-                archivo = export_midi(acordes_solo, f"{titulo}.mid")
-                with open(archivo, "rb") as f:
-                    st.download_button("Descargar MIDI", f, file_name=f"{titulo}.mid")
+st.markdown("---")
+st.info("Este módulo muestra la teoría básica: escala, acordes diatónicos (triada y séptima) y modos. Próximos pasos que puedo añadir: inversiones, voicings (drop2), acordes 9/11/13, modulaciones automáticas, piano-roll y exportar MIDI/sonido. Dime cuál quieres que agregue primero.")
