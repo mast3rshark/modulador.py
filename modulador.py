@@ -28,15 +28,24 @@ GRADOS_MAYORES = ["I", "ii", "iii", "IV", "V", "vi", "vii°"]
 # Construcción de acordes
 ############################################
 def build_chord(root, tipo):
+    """Genera acordes mayores, menores, maj7 y min7."""
     index = NOTAS.index(root)
-    tercera = {"maj": 4, "min": 3}[tipo]
+
+    # Interválica
+    terceras = {"maj": 4, "min": 3, "maj7": 4, "min7": 3}
+    septimas = {"maj7": 11, "min7": 10}
+
+    tercera = terceras[tipo]
     quinta = 7
-    septima = {"maj7": 11, "min7": 10}
 
-    notas = [NOTAS[(index + intervalo) % 12] for intervalo in [0, tercera, quinta]]
+    notas = [
+        NOTAS[(index + 0) % 12],
+        NOTAS[(index + tercera) % 12],
+        NOTAS[(index + quinta) % 12]
+    ]
 
-    if "7" in tipo:
-        notas.append(NOTAS[(index + septima[tipo]) % 12])
+    if tipo in ["maj7", "min7"]:
+        notas.append(NOTAS[(index + septimas[tipo]) % 12])
 
     return notas
 
@@ -60,18 +69,17 @@ def export_midi(acordes, filename="modulacion.mid"):
     return filename
 
 ############################################
-# Generación de opciones
+# Opciones de modulación
 ############################################
 def mod_pivote(t1, t2):
     escala1 = ESCALAS_MAYORES[t1]
     escala2 = ESCALAS_MAYORES[t2]
 
-    pivotes = [n for n in escala1 if n in escala2]
-
-    if not pivotes:
+    comunes = [n for n in escala1 if n in escala2]
+    if not comunes:
         return None
 
-    pivote = pivotes[0]
+    pivote = comunes[0]
 
     return [
         (f"{t1}maj7 (I en {t1})", build_chord(t1, "maj7")),
@@ -80,18 +88,18 @@ def mod_pivote(t1, t2):
     ]
 
 def mod_dominante(t1, t2):
-    V_de_t2 = ESCALAS_MAYORES[t2][4]  # quinto grado del destino
+    V_de_t2 = ESCALAS_MAYORES[t2][4]
     return [
         (f"{t1}maj7 (I en {t1})", build_chord(t1, "maj7")),
-        (f"{V_de_t2}7 (V7 hacia {t2})", build_chord(V_de_t2, "maj7")),
+        (f"{V_de_t2}7 (dominante hacia {t2})", build_chord(V_de_t2, "maj7")),
         (f"{t2}maj7 (I en {t2})", build_chord(t2, "maj7"))
     ]
 
 def mod_cromatica(t1, t2):
-    paso = NOTAS[(NOTAS.index(t1) + 1) % 12]  # subir un semitono
+    paso = NOTAS[(NOTAS.index(t1) + 1) % 12]
     return [
-        (f"{t1}maj (I en {t1})", build_chord(t1, "maj")),
-        (f"{paso}m7 (acorde cromático)", build_chord(paso, "min7")),
+        (f"{t1}maj (I)", build_chord(t1, "maj")),
+        (f"{paso}m7 (cromático)", build_chord(paso, "min7")),
         (f"{t2}maj7 (I en {t2})", build_chord(t2, "maj7"))
     ]
 
@@ -105,35 +113,36 @@ t1 = col1.selectbox("Tonalidad de origen", NOTAS)
 t2 = col2.selectbox("Tonalidad destino", NOTAS)
 
 if st.button("Generar Modulaciones"):
-    st.subheader("🎯 Información de las tonalidades")
+    st.subheader("🎯 Tonalidades y grados")
 
-    st.write(f"**{t1} mayor:**")
+    st.write(f"### {t1} mayor")
     for g, n in zip(GRADOS_MAYORES, ESCALAS_MAYORES[t1]):
         st.write(f"{g}: {n}")
 
-    st.write(f"**{t2} mayor:**")
+    st.write(f"### {t2} mayor")
     for g, n in zip(GRADOS_MAYORES, ESCALAS_MAYORES[t2]):
         st.write(f"{g}: {n}")
 
     st.divider()
+    st.subheader("🎵 Opciones de modulación")
 
-    # Opciones
     opciones = [
         ("Modulación por acorde pivote", mod_pivote(t1, t2)),
         ("Dominante secundaria hacia la nueva tonalidad", mod_dominante(t1, t2)),
-        ("Modulación cromática", mod_cromatica(t1, t2))
+        ("Modulación cromática", mod_cromatica(t1, t2)),
     ]
 
     for titulo, progresion in opciones:
         if progresion:
-            st.subheader(f"🔹 {titulo}")
+            st.markdown(f"## 🔹 {titulo}")
 
-            acordes_solo_notas = []
+            acordes_solo = []
+
             for nombre, notas in progresion:
                 st.write(f"**{nombre}:** {notas}")
-                acordes_solo_notas.append(notas)
+                acordes_solo.append(notas)
 
-            if st.button(f"Exportar '{titulo}' a MIDI"):
-                archivo = export_midi(acordes_solo_notas, f"{titulo}.mid")
+            if st.button(f"Exportar '{titulo}' como MIDI"):
+                archivo = export_midi(acordes_solo, f"{titulo}.mid")
                 with open(archivo, "rb") as f:
                     st.download_button("Descargar MIDI", f, file_name=f"{titulo}.mid")
