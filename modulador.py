@@ -111,7 +111,7 @@ elif page == "Círculo de Quintas":
     st.markdown("Distancia en pasos del círculo:")
     dest = st.selectbox("¿A qué tonalidad te gustaría ir? (modulación)", options=labels, index=2)
     steps = (labels.index(dest) - idx)
-    st.write(f"Distancia: {steps} pasos (positivo = horario). Recomendación: 0 mismo; ±1 muy suave; ±2-3 moderada; ≥4 fuerte. :contentReference[oaicite:10]{index=10}")
+    st.write(f"Distancia: {steps} pasos (positivo = horario). Recomendación: 0 = mismo tono; ±1 = muy suave; ±2-3 = moderada; ≥4 = fuerte.")
 
 # ------------------ MODES & CHORDS ------------------
 elif page == "Modos y Acordes":
